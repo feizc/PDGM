@@ -1,2 +1,1 @@
-# PDG
-Progressive denoising generation
+# PDGM: Progressive Denoising Generation Model
