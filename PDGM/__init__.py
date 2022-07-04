@@ -1,2 +1,2 @@
-from configuration import * 
-from progressive import *  
+from .configuration import * 
+from .progressive import *  
