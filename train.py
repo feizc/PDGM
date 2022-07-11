@@ -6,6 +6,7 @@ from torch.nn import functional as nnf
 from dataset import PDGMDataset
 from PDGM import TextEncoderConfig, ProgressiveDecoderConfig, PDGModel 
 from torch.utils.data import DataLoader
+from dall_e import load_model 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
 
@@ -37,6 +38,7 @@ def train(train_dataloader, model, args):
         for idx, (tokens, mask, image_ids, labels) in enumerate(train_dataloader): 
             model.zero_grad() 
             tokens, mask, image_ids, labels = tokens.to(device), mask.to(device), image_ids.to(device), labels.to(device)
+
             logits = model(text_ids=tokens, text_attention_mask=mask, image_ids=image_ids) 
             #loss1 = nnf.cross_entropy(logits.reshape(-1, logits.shape[-1]), labels.flatten(), ignore_index=8192) 
             #loss2 = nnf.cross_entropy(logits.reshape(-1, logits.shape[-1]), labels.flatten())
@@ -65,7 +67,7 @@ def train(train_dataloader, model, args):
 
 def main(): 
     parser = argparse.ArgumentParser() 
-    parser.add_argument('--data_path', default='./data/train.json') 
+    parser.add_argument('--data_path', default='/Users/feizhengcong/Desktop/COCO' ) 
     parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--warm_up', type=int, default=5000)
@@ -73,7 +75,8 @@ def main():
     parser.add_argument('--alpha', type=int, default=10)
     args = parser.parse_args() 
 
-    train_dataset = PDGMDataset(args.data_path) 
+    vqvae_decoder = load_model('./ckpt/vqvae/encoder.pkl', device)  
+    train_dataset = PDGMDataset(args.data_path, vqvae_decoder, device) 
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     text_config = TextEncoderConfig()
