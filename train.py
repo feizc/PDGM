@@ -8,6 +8,7 @@ from PDGM import TextEncoderConfig, ProgressiveDecoderConfig, PDGModel
 from torch.utils.data import DataLoader
 from dall_e import load_model 
 
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
 
 
@@ -25,7 +26,7 @@ def reweight_cross_entropy(predict, input, target):
     return loss.mean()
 
 
-def train(train_dataloader, model, args): 
+def pre_train(train_dataloader, model, args): 
     model.train() 
     optimizer = AdamW(model.parameters(), lr=args.lr) 
     scheduler = get_linear_schedule_with_warmup(
@@ -65,13 +66,58 @@ def train(train_dataloader, model, args):
 
 
 
+# Optimize with mutual information 
+def fine_tune(train_dataloader, model, args, alpha=0.1): 
+    model.train() 
+    optimizer = AdamW(model.parameters(), lr=args.ft_lr)  
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer, num_warmup_steps=args.warm_up, num_training_steps=args.ft_epochs * len(train_dataloader)
+    ) 
+    for epoch in range(args.ft_epochs): 
+        loss_sum = 0 
+        acc_sum = 0 
+        progress = tqdm(total=len(train_dataloader), desc='PDGM ft') 
+        for idx, (tokens, mask, image_ids, labels) in enumerate(train_dataloader): 
+            model.zero_grad() 
+            tokens, mask, image_ids, labels = tokens.to(device), mask.to(device), image_ids.to(device), labels.to(device) 
+            uncondi_tokens = torch.zeros_like(tokens).to(device) 
+
+            logits = model(text_ids=tokens, text_attention_mask=mask, image_ids=image_ids) 
+            uncondi_logits = model(text_ids=uncondi_tokens, text_attention_mask=mask, image_ids=image_ids) 
+            logits_cb = ((1 - alpha) * logits + alpha * uncondi_logits).log_softmax(2).detach() 
+
+            kl = -((logits - logits_cb) * logits_cb.exp()).sum(2).mean() 
+            kl.backward() 
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad() 
+            loss_sum += kl.item()
+            predicts = torch.argmax(logits, dim=-1).flatten() 
+            acc = torch.eq(predicts.cpu(), labels.flatten().cpu()).float().sum() / predicts.size(0) 
+            acc_sum += acc.item()
+            progress.set_postfix({"loss": loss_sum / (idx + 1), "acc": acc_sum / (idx + 1)})
+            progress.update()
+            break 
+        progress.close()
+        torch.save(
+            model.state_dict(), 
+            './ckpt/latest.pth', 
+        )
+        break
+
+
+
+
+
 def main(): 
     parser = argparse.ArgumentParser() 
     parser.add_argument('--data_path', default='/Users/feizhengcong/Desktop/COCO' ) 
     parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--ft_lr', type=float, default=1e-6)
     parser.add_argument('--warm_up', type=int, default=5000)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=20) 
+    parser.add_argument('--ft_epochs', type=int, default=5)
     parser.add_argument('--alpha', type=int, default=10)
     args = parser.parse_args() 
 
@@ -84,7 +130,9 @@ def main():
     model = PDGModel(text_config=text_config, image_config=image_config) 
     model = model.to(device) 
 
-    train(train_dataloader, model, args) 
+    pre_train(train_dataloader, model, args) 
+    fine_tune(train_dataloader, model, args)
+
 
 
 
