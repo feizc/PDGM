@@ -6,23 +6,23 @@ from transformers import BertTokenizer
 import json 
 import os 
 import PIL 
+import pickle
 
 from case import preprocess 
 
 
 class FastPDGMDataset(Dataset): 
-    "Load data from pre-extracted features"
+    "Load data from pre-extracted features with pickle"
     def __init__(self, data_path): 
-        with open(data_path, 'r') as f: 
-            self.all_data_pair = json.load(f)  
+        self.data_path = data_path 
+        self.f = open(data_path, 'rb')
         self.tokenizer = BertTokenizer.from_pretrained('./ckpt/bert') 
         self.max_seq_len = 20 
 
     def __len__(self): 
-        return len(self.all_data_pair) 
+        return 16
 
-    def pad_tokens(self, index): 
-        tokens = self.all_data_pair[index]['caption'] 
+    def pad_tokens(self, tokens): 
         tokens = torch.tensor(self.tokenizer.encode(tokens), dtype=torch.int64) 
         padding = self.max_seq_len - tokens.shape[0]
         if padding > 0:
@@ -35,9 +35,14 @@ class FastPDGMDataset(Dataset):
         return tokens, mask 
     
     def __getitem__(self, index): 
-        tokens, mask = self.pad_tokens(index) 
-        input_ids = torch.Tensor(self.all_data_pair[index]['image_token'][0]).long() 
-        labels = torch.Tensor(self.all_data_pair[index]['image_token'][1]).long() 
+        try: 
+            item = pickle.load(self.f) 
+        except EOFError:
+            self.f = open(self.data_path, 'rb') 
+            item = pickle.load(self.f) 
+        tokens, mask = self.pad_tokens(item['caption']) 
+        input_ids = torch.Tensor(item['image_token'][0]).long() 
+        labels = torch.Tensor(item['image_token'][1]).long() 
         return tokens, mask, input_ids, labels 
         
 
@@ -91,12 +96,12 @@ class PDGMDataset(Dataset):
             threshold = torch.min(p) - 1 
         else:
             threshold, _ = torch.kthvalue(p, 64*step) 
-        z[p < threshold] = 8192 
-        labels = z 
+        z[p <= threshold] = 8192 
+        labels = z.clone()
         
         threshold, _ = torch.kthvalue(p, 64*(step+1)) 
-        z[p < threshold] = 8192 
-        input_ids = z 
+        z[p <= threshold] = 8192 
+        input_ids = z.clone()
 
         return tokens, mask, input_ids, labels 
 

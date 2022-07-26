@@ -3,7 +3,7 @@ import argparse
 from tqdm import tqdm 
 from transformers import AdamW, get_linear_schedule_with_warmup
 from torch.nn import functional as nnf 
-from dataset import PDGMDataset
+from dataset import FastPDGMDataset
 from PDGM import TextEncoderConfig, ProgressiveDecoderConfig, PDGModel 
 from torch.utils.data import DataLoader
 from dall_e import load_model 
@@ -56,13 +56,13 @@ def pre_train(train_dataloader, model, args):
             acc_sum += acc.item()
             progress.set_postfix({"loss": loss_sum / (idx + 1), "acc": acc_sum / (idx + 1)})
             progress.update()
-            break 
+            #break 
         progress.close()
         torch.save(
             model.state_dict(), 
             './ckpt/latest.pth', 
         )
-        break
+        #break
 
 
 
@@ -96,7 +96,13 @@ def fine_tune(train_dataloader, model, args, alpha=0.1):
             acc = torch.eq(predicts.cpu(), labels.flatten().cpu()).float().sum() / predicts.size(0) 
             acc_sum += acc.item()
             progress.set_postfix({"loss": loss_sum / (idx + 1), "acc": acc_sum / (idx + 1)})
-            progress.update()
+            progress.update() 
+
+            if (idx + 1) % 10000 == 0:
+                torch.save(
+                    model.state_dict(),
+                    './ckpt/latest.pth',
+                )
             break 
         progress.close()
         torch.save(
@@ -107,11 +113,10 @@ def fine_tune(train_dataloader, model, args, alpha=0.1):
 
 
 
-
-
 def main(): 
     parser = argparse.ArgumentParser() 
-    parser.add_argument('--data_path', default='/Users/feizhengcong/Desktop/COCO' ) 
+    #parser.add_argument('--data_path', default='/Users/feizhengcong/Desktop/COCO' ) 
+    parser.add_argument('--data_path', default='./data/train.pkl' ) 
     parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--ft_lr', type=float, default=1e-6)
@@ -122,7 +127,8 @@ def main():
     args = parser.parse_args() 
 
     vqvae_decoder = load_model('./ckpt/vqvae/encoder.pkl', device)  
-    train_dataset = PDGMDataset(args.data_path, vqvae_decoder, device) 
+    # train_dataset = PDGMDataset(args.data_path, vqvae_decoder, device) 
+    train_dataset = FastPDGMDataset(args.data_path) 
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     text_config = TextEncoderConfig()
@@ -131,7 +137,7 @@ def main():
     model = model.to(device) 
 
     pre_train(train_dataloader, model, args) 
-    fine_tune(train_dataloader, model, args)
+    # fine_tune(train_dataloader, model, args)
 
 
 
